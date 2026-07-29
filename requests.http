@@ -1,0 +1,163 @@
+### KỊCH BẢN KIỂM THỬ API - PHẦN MỀM THỐNG KÊ KẾ HOẠCH NHÀ MÁY (TYPEORM)
+@baseUrl = http://localhost:3000
+
+# ==========================================
+# 1. ĐĂNG NHẬP HỆ THỐNG
+# ==========================================
+
+### 1.1 Đăng nhập tài khoản Công nhân 1
+# @name loginWorker
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "worker1",
+  "password": "password123"
+}
+
+### Lưu Access Token của công nhân
+@workerToken = {{loginWorker.response.body.accessToken}}
+
+
+### 1.2 Đăng nhập tài khoản Quản lý (Trưởng phòng)
+# @name loginManager
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "manager",
+  "password": "password123"
+}
+
+### Lưu Access Token của quản lý
+@managerToken = {{loginManager.response.body.accessToken}}
+
+# ==========================================
+# 2. NGHIỆP VỤ NHẬP LIỆU CÔNG NHÂN (Tab 2, 3 & 4)
+# ==========================================
+
+### 2.1 Truy vấn Tồn đầu vật tư Sóng E trên máy HH1 (Lấy tồn cuối ca trước)
+GET {{baseUrl}}/production/initial-stock?machineId=YOUR_MACHINE_ID_HERE&materialId=YOUR_MATERIAL_ID_HERE
+Authorization: Bearer {{workerToken}}
+
+# LƯU Ý: Ở bước 2.2, chúng ta cần điền đúng UUID của các thực thể đã được sinh trong Database khi Seed.
+# Hãy chạy seed trước để lấy danh sách ID, hoặc xem danh sách ID mẫu từ JSON phản hồi.
+
+### 2.2 Tạo ca sản xuất mới (Khâu Bồi, Ca C1, Máy HH1)
+# Bối cảnh ca được giữ nguyên, công nhân có thể thêm nhiều lệnh.
+# @name createShift
+POST {{baseUrl}}/production/shift
+Authorization: Bearer {{workerToken}}
+Content-Type: application/json
+
+{
+  "date": "2026-07-29T00:00:00.000Z",
+  "shift": "C1",
+  "departmentId": "INSERT_DEPT_BOI_UUID_HERE",
+  "machineId": "INSERT_MACHINE_HH1_UUID_HERE",
+  "workerIds": [
+    "INSERT_WORKER1_UUID_HERE",
+    "INSERT_WORKER2_UUID_HERE"
+  ]
+}
+
+### Lưu Shift ID vừa tạo
+@shiftId = {{createShift.response.body.id}}
+
+
+### 2.3 THỬ NGHIỆM LỖI: Nhập lệnh sản xuất có Hao phí > 5% nhưng KHÔNG có lý do
+# Đạt 1000, hỏng SX 60 -> Tổng = 1060. Hao phí = 60/1060 = 5.66% (>5%)
+# Hệ thống sẽ chặn lưu và trả về mã lỗi 400 cùng cảnh báo đỏ.
+POST {{baseUrl}}/production/shift/{{shiftId}}/record
+Authorization: Bearer {{workerToken}}
+Content-Type: application/json
+
+{
+  "workOrderId": "INSERT_WORK_ORDER_LSX001_UUID_HERE",
+  "quantityProduced": 1000,
+  "scrapQuantity": 60,
+  "scrapOtherQuantity": 0,
+  "productionTime": 240,
+  "notes": "", 
+  "materials": [
+    {
+      "materialId": "INSERT_MATERIAL_SONG_E_UUID_HERE",
+      "initialStock": 100,
+      "newlyReceived": 50,
+      "consumed": 110
+    }
+  ]
+}
+
+
+### 2.4 LƯU THÀNH CÔNG: Nhập lệnh sản xuất có Hao phí > 5% VÀ ĐÃ điền lý do ở Ghi chú
+POST {{baseUrl}}/production/shift/{{shiftId}}/record
+Authorization: Bearer {{workerToken}}
+Content-Type: application/json
+
+{
+  "workOrderId": "INSERT_WORK_ORDER_LSX001_UUID_HERE",
+  "quantityProduced": 1000,
+  "scrapQuantity": 60,
+  "scrapOtherQuantity": 0,
+  "productionTime": 240,
+  "notes": "Hao phí cao do lô máy đầu ca chạy thử bị lệch nhiệt gây nhăn giấy.",
+  "materials": [
+    {
+      "materialId": "INSERT_MATERIAL_SONG_E_UUID_HERE",
+      "initialStock": 100,
+      "newlyReceived": 50,
+      "consumed": 110
+    }
+  ],
+  "handovers": [
+    {
+      "targetDepartmentId": "INSERT_DEPT_BE_UUID_HERE",
+      "quantity": 1000,
+      "recipientName": "Trần Văn G"
+    }
+  ]
+}
+
+
+### 2.5 Hoàn thành ca sản xuất (Khóa quyền sửa của công nhân)
+POST {{baseUrl}}/production/shift/{{shiftId}}/complete
+Authorization: Bearer {{workerToken}}
+
+# ==========================================
+# 3. NGHIỆP VỤ MÀN HÌNH QUẢN LÝ (Tab 4)
+# ==========================================
+
+### 3.1 Xem Dashboard KPI
+GET {{baseUrl}}/manager/dashboard
+Authorization: Bearer {{managerToken}}
+
+### 3.2 Lọc Dashboard KPI theo khoảng thời gian và khâu
+GET {{baseUrl}}/manager/dashboard?startDate=2026-07-28&endDate=2026-07-30&departmentId=INSERT_DEPT_BOI_UUID_HERE
+Authorization: Bearer {{managerToken}}
+
+
+### 3.3 Xem Báo cáo tổng hợp theo Khâu (Khoan sâu Máy, Lệnh, Vật tư)
+GET {{baseUrl}}/manager/reports/by-department
+Authorization: Bearer {{managerToken}}
+
+
+### 3.4 Phê duyệt ca sản xuất
+POST {{baseUrl}}/manager/shift/{{shiftId}}/approve
+Authorization: Bearer {{managerToken}}
+
+
+### 3.5 Khóa sổ ca sản xuất
+POST {{baseUrl}}/manager/shift/{{shiftId}}/lock
+Authorization: Bearer {{managerToken}}
+
+
+### 3.6 Sao chép ca sản xuất sang ngày khác (ví dụ: ngày mai ca C2)
+POST {{baseUrl}}/manager/shift/{{shiftId}}/clone
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{
+  "targetDate": "2026-07-30T00:00:00.000Z",
+  "targetShift": "C2"
+}
